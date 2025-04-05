@@ -7,6 +7,7 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+import time # Added for sleep
 
 # --- Path Correction --- 
 # Add the project root directory (parent of 'ai_english_assistant') to the Python path
@@ -84,6 +85,9 @@ def run_console_app():
     print("  'new'  - to start a new conversation session.")
     print("  'tts on'/'tts off' - to toggle speech output for this session.")
     print("  'prompt <name>' - to switch to a prompt defined in config.toml.")
+    print("  'save' - to save the current conversation session.")
+    print("  'load <session_id>' - to load a previously saved session.")
+    print("  'sessions' - to list all available saved sessions.")
     print("------------------------------------------------")
 
 
@@ -132,6 +136,12 @@ def run_console_app():
              continue
         elif command.startswith("prompt "):
             prompt_name = user_text[7:].strip()
+            if not prompt_name:
+                print("Assistant: Please provide a prompt name. Available prompts: ")
+                # List available prompts
+                print(", ".join(assistant.prompt_manager.prompts_config.keys()))
+                continue
+                
             logger.info(f"User requested prompt switch to: {prompt_name}")
             if assistant.switch_prompt(prompt_name):
                 response_text = f"Switched to prompt '{prompt_name}'. Let's start fresh."
@@ -142,6 +152,58 @@ def run_console_app():
                  # Error/warning already logged by switch_prompt
                  response_text = f"Sorry, I couldn't find or load a prompt named '{prompt_name}'."
                  print(f"Assistant: {response_text}")
+                 # List available prompts
+                 print("Available prompts: ")
+                 print(", ".join(assistant.prompt_manager.prompts_config.keys()))
+            continue
+        elif command == 'save':
+            try:
+                filepath = assistant.save_session()
+                if filepath:
+                    print(f"Assistant: Session saved to {filepath}")
+                    if use_tts_in_console:
+                        assistant.tts_synthesizer.speak("Session saved successfully.")
+                else:
+                    print("Assistant: Failed to save session. Check logs for details.")
+            except Exception as e:
+                logger.error(f"Error saving session: {e}", exc_info=True)
+                print(f"Assistant: Error saving session: {e}")
+            continue
+        elif command.startswith('load '):
+            session_id = user_text[5:].strip()
+            if not session_id:
+                print("Assistant: Please specify a session ID to load.")
+                continue
+                
+            try:
+                if assistant.load_session(session_id):
+                    print(f"Assistant: Session '{session_id}' loaded successfully.")
+                    if use_tts_in_console:
+                        assistant.tts_synthesizer.speak("Session loaded successfully.")
+                else:
+                    print(f"Assistant: Failed to load session '{session_id}'. Check logs for details.")
+            except Exception as e:
+                logger.error(f"Error loading session: {e}", exc_info=True)
+                print(f"Assistant: Error loading session: {e}")
+            continue
+        elif command == 'sessions':
+            try:
+                sessions = assistant.list_saved_sessions()
+                if sessions:
+                    print("Available saved sessions:")
+                    print("-" * 80)
+                    for i, session in enumerate(sessions, 1):
+                        print(f"{i}. ID: {session['id']}")
+                        print(f"   Date: {session['timestamp']}")
+                        print(f"   Prompt: {session['prompt_id']}")
+                        print(f"   Messages: {session['messages']}")
+                        print("-" * 80)
+                    print("To load a session, use 'load <session_id>'")
+                else:
+                    print("Assistant: No saved sessions found.")
+            except Exception as e:
+                logger.error(f"Error listing sessions: {e}", exc_info=True)
+                print(f"Assistant: Error listing sessions: {e}")
             continue
 
         # If not a command, process as user input to the LLM
@@ -153,36 +215,55 @@ def run_console_app():
         # !! 修改: 处理流式响应 (Modification: Handle streaming response) !!
         print("Assistant: ", end='', flush=True) # Print prefix without newline
         full_response = ""
+        stream_error = False # Flag to track if an error occurred during streaming
         try:
             stream_generator = assistant.get_response_stream(user_text)
             for chunk in stream_generator:
-                 if not chunk.startswith("[ERROR:"):
-                      print(chunk, end='', flush=True) # Print chunks as they arrive
+                 # Filter out specific error/status messages yielded by the generator
+                 is_status_message = chunk.startswith(('[ERROR:', '[API rate limit', '[Connection error'))
+                 
+                 if not is_status_message:
+                      print(chunk, end='', flush=True) # Print normal content chunks
                       full_response += chunk
                  else:
-                      # Handle potential error message yielded by the generator
-                      print(f"\n[Stream Error: {chunk[7:-1]}]") 
-                      logger.error(f"Error received from stream: {chunk}")
-                      full_response = None # Indicate error
-                      break # Stop processing stream on error
-            print() # Add newline after stream finishes or errors
+                      # Handle specific error/status messages
+                      if chunk.startswith('[ERROR:'):
+                          # Permanent error, print it clearly and stop
+                          print(f"\n{chunk}") # Print error on new line
+                          logger.error(f"Error received from stream: {chunk}")
+                          full_response = None # Indicate error
+                          stream_error = True
+                          break # Stop processing stream on error
+                      else:
+                          # Temporary status (like retry), print and overwrite
+                          print(f"\n{chunk}", end='\r', flush=True) # Use \r to overwrite
+                          time.sleep(0.011) # Short pause to make it visible
+
+            # Ensure the final output ends with a newline
+            # This is crucial to separate the assistant response from subsequent logs/input prompts
+            print(flush=True) # Ensures newline is printed and flushed
         except RuntimeError as e:
              # Handle critical errors raised by get_response_stream (e.g., client not ready)
-             print(f"\n[Critical Error: {e}]")
+             print(f"\n[Critical Error: {e}]", flush=True) # Flush critical errors too
              logger.error(f"RuntimeError during get_response_stream: {e}", exc_info=True)
              full_response = None
+             stream_error = True # Mark as error
         except Exception as e:
              # Catch any other unexpected errors during stream iteration
-             print(f"\n[Unexpected Error: {e}]")
+             print(f"\n[Unexpected Error: {e}]", flush=True) # Flush unexpected errors
              logger.error(f"Unexpected error processing stream: {e}", exc_info=True)
              full_response = None
+             stream_error = True # Mark as error
         
-        # 语音合成现在需要完整的响应 (TTS now needs the full response)
-        if use_tts_in_console and full_response:
-             logger.info(f"Speaking full response (length: {len(full_response)})")
+        # Speak the response *after* the newline has been printed
+        # Check full_response is not None and no stream_error occurred
+        if use_tts_in_console and full_response is not None and not stream_error:
+             # Logging TTS *after* printing is complete
+             logger.info(f"Speaking full response (length: {len(full_response)})") 
              assistant.tts_synthesizer.speak(full_response)
-        elif use_tts_in_console and full_response is None:
-            logger.warning("Skipping TTS because response generation failed.")
+        elif use_tts_in_console and (full_response is None or stream_error):
+            # Log skipping TTS *after* potential error printing
+            logger.warning("Skipping TTS because response generation failed or errored.")
 
 if __name__ == "__main__":
     run_console_app()

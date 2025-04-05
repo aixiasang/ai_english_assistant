@@ -1,6 +1,10 @@
 from typing import Dict, List, Optional, Any, Generator
 from collections import deque
 import logging
+import os
+import json
+from pathlib import Path
+import datetime
 
 # Import necessary components
 from .config.settings import settings
@@ -62,6 +66,10 @@ class Assistant:
         self.max_history = self.settings.get('session', {}).get('max_history', 10)
         self.session_history: deque[Dict[str, str]] = deque(maxlen=self.max_history)
         
+        # 会话保存路径 (Session save path)
+        self.session_save_path = self._get_session_save_path()
+        self.current_session_id = None
+        
         logger.info("AI 英语助手初始化完成 (AI English Assistant initialized).")
         if not self.llm_client or not self.llm_client.is_ready(): 
              logger.warning("LLM 客户端未能初始化或未配置API Key (Warning: LLM Client could not be initialized or API Key not configured).")
@@ -85,6 +93,23 @@ class Assistant:
             logger.error(f"无法加载或渲染 Prompt '{self.current_prompt_identifier}'. 回退到默认 Prompt。")
             self.system_prompt = DEFAULT_SYSTEM_PROMPT
 
+    def _get_session_save_path(self) -> Path:
+        """获取会话保存路径，并确保目录存在 (Gets the session save path and ensures the directory exists)."""
+        # Get the path from settings, or use a default
+        save_path_str = self.settings.get('session', {}).get('save_path', 'sessions/')
+        # If relative, make it relative to the project root
+        if not os.path.isabs(save_path_str):
+            # Get the project root (assumes this file is in ai_english_assistant/)
+            project_root = Path(__file__).parent.parent
+            save_path = project_root / save_path_str
+        else:
+            save_path = Path(save_path_str)
+        
+        # Ensure the directory exists
+        save_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Session save path set to: {save_path}")
+        return save_path
+
     def set_user_info(self, **kwargs: Any):
         """Updates user info and re-renders the current prompt."""
         updated = False
@@ -100,20 +125,155 @@ class Assistant:
              logger.info(f"用户信息已更新: {self.user_info}")
              self._update_system_prompt() # Re-render prompt with new info
 
-    def start_new_session(self, keep_prompt: bool = True):
-        """Clears the current session history.
+    def start_new_session(self, keep_prompt: bool = True, session_id: Optional[str] = None):
+        """Clears the current session history and optionally sets a new session ID.
 
         Args:
             keep_prompt: Whether to keep the current system prompt. 
-                          If False, resets to default.
+                         If False, resets to default.
+            session_id: Optional specific session ID to use. If None, a new one is generated.
         """
         self.session_history.clear()
+        
+        # Generate or set session ID
+        if session_id:
+            self.current_session_id = session_id
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            prompt_short = self.current_prompt_identifier.split('_')[0]  # Use first part of prompt identifier
+            self.current_session_id = f"{prompt_short}_{timestamp}"
+        
         if not keep_prompt:
              self.current_prompt_identifier = DEFAULT_PROMPT_IDENTIFIER
              self._update_system_prompt()
              logger.info(f"会话已重置，并切换回默认 Prompt '{self.current_prompt_identifier}' (Session reset, switched back to default prompt).")
         else:
-            logger.info("新会话已开始，历史已清除 (New session started. History cleared).")
+            logger.info(f"新会话已开始，ID: {self.current_session_id} (New session started, ID: {self.current_session_id}).")
+
+    def save_session(self, custom_filename: Optional[str] = None) -> Optional[str]:
+        """Saves the current session to a JSON file.
+        
+        Args:
+            custom_filename: Optional custom filename to use. If None, uses the session ID.
+            
+        Returns:
+            Path to the saved file, or None if saving failed.
+        """
+        if not self.current_session_id and not custom_filename:
+            logger.error("Cannot save session: No session ID or custom filename provided.")
+            return None
+            
+        try:
+            # Prepare session data
+            session_data = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "prompt_identifier": self.current_prompt_identifier,
+                "system_prompt": self.system_prompt,
+                "user_info": self.user_info,
+                "history": list(self.session_history)  # Convert deque to list for serialization
+            }
+            
+            # Determine filename
+            filename = custom_filename or f"{self.current_session_id}.json"
+            filepath = self.session_save_path / filename
+            
+            # Save to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+                
+            logger.info(f"Session saved to {filepath}")
+            return str(filepath)
+        except Exception as e:
+            logger.error(f"Failed to save session: {e}", exc_info=True)
+            return None
+
+    def load_session(self, filepath: str) -> bool:
+        """Loads a session from a JSON file.
+        
+        Args:
+            filepath: Path to the session file to load.
+            
+        Returns:
+            True if the session was loaded successfully, False otherwise.
+        """
+        try:
+            # Convert string path to Path object if necessary
+            if isinstance(filepath, str):
+                # If path is not absolute, assume it's relative to session_save_path
+                if not os.path.isabs(filepath):
+                    filepath = self.session_save_path / filepath
+                # Add .json extension if not present
+                if not filepath.endswith('.json'):
+                    filepath = f"{filepath}.json"
+                    
+            logger.info(f"Attempting to load session from {filepath}")
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+                
+            # Load session data
+            self.session_history.clear()
+            for msg in session_data.get("history", []):
+                self.session_history.append(msg)
+                
+            # Load prompt
+            prompt_id = session_data.get("prompt_identifier")
+            if prompt_id and prompt_id != self.current_prompt_identifier:
+                self.current_prompt_identifier = prompt_id
+                self._update_system_prompt()
+                
+            # Set other attributes if needed
+            if "user_info" in session_data:
+                self.user_info.update(session_data["user_info"])
+                
+            # Extract session ID from filename if possible
+            try:
+                self.current_session_id = os.path.basename(filepath).split('.')[0]
+            except:
+                # Generate a new session ID based on timestamp
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.current_session_id = f"loaded_{timestamp}"
+                
+            logger.info(f"Session loaded successfully. ID: {self.current_session_id}, History size: {len(self.session_history)}")
+            return True
+            
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            logger.error(f"Failed to load session: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error loading session: {e}", exc_info=True)
+            return False
+
+    def list_saved_sessions(self) -> List[Dict[str, Any]]:
+        """Lists all saved sessions with basic information.
+        
+        Returns:
+            List of dictionaries containing session info: id, timestamp, prompt_id
+        """
+        sessions = []
+        try:
+            for file in self.session_save_path.glob("*.json"):
+                try:
+                    with open(file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        sessions.append({
+                            "id": file.stem,
+                            "filename": file.name,
+                            "timestamp": data.get("timestamp", "Unknown"),
+                            "prompt_id": data.get("prompt_identifier", "Unknown"),
+                            "messages": len(data.get("history", [])),
+                            "filepath": str(file)
+                        })
+                except:
+                    # Skip files that can't be loaded properly
+                    logger.warning(f"Could not load session info from {file}")
+            
+            # Sort by timestamp (recent first)
+            sessions.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            return sessions
+        except Exception as e:
+            logger.error(f"Error listing saved sessions: {e}", exc_info=True)
+            return []
 
     def _add_to_history(self, role: str, content: str):
         """Adds a message to history, respecting max length."""
@@ -164,7 +324,8 @@ class Assistant:
             for chunk in stream_generator:
                 yield chunk
                 full_assistant_response += chunk
-            
+            yield "\n" # 添加一个换行符 美化显示
+            full_assistant_response += "\n"
             # 流结束后，将完整的助手响应添加到历史记录 (After stream ends, add complete assistant response to history)
             # 确保在迭代完成后添加 (Ensure it's added after iteration completes)
             self._add_to_history("assistant", full_assistant_response)

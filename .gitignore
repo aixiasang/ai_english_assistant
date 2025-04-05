@@ -142,6 +142,7 @@ dmypy.json
 
 logs/
 tts_output/
+sessions/
 
 # 忽略所有 .log 文件
 *.log
