@@ -1,0 +1,53 @@
+[openai]
+# api_key = "sk-proj-1234567890" # 优先使用环境变量 OPENAI_API_KEY
+# base_url = "http://localhost:8000/v1" # 可选，用于兼容其他 OpenAI 接口或本地模型
+# model = "gpt-3.5-turbo" # 默认使用的模型
+default_temperature = 0.7
+default_max_tokens = 4096
+
+[tts]
+enabled = true        # Enable or disable TTS functionality
+engine = "gtts"       # Default TTS engine: gtts, pyttsx3, piper, coqui
+# gTTS specific settings
+gtts_lang = "en"      # Language for gTTS (e.g., 'en', 'zh-cn', 'es')
+
+# pyttsx3 specific settings (Offline, basic)
+# No specific config needed here, uses system voices
+
+# Piper specific settings (Offline, higher quality, requires model download)
+# piper_model_path = "path/to/your/piper/model.onnx"      # Path to the Piper ONNX model file
+# piper_config_path = "path/to/your/piper/model.onnx.json" # Path to the Piper JSON config file (optional for some models)
+
+# Coqui TTS specific settings (Offline, high quality, voice cloning, requires model download/setup)
+# coqui_model_name = "tts_models/multilingual/multi-dataset/xtts_v2" # Model name/path (e.g., XTTSv2)
+# # coqui_speaker_wav = "path/to/your/speaker.wav" # Optional path to a WAV file for voice cloning
+# coqui_language = "en"                              # Target language for synthesis (e.g., 'en', 'zh-cn')
+# coqui_use_gpu = false                              # Use GPU if available (requires PyTorch with CUDA)
+
+# [Old Coqui Config - Less relevant for XTTS]
+# model_name = "tts_models/en/ljspeech/tacotron2-DDC"
+# vocoder_name = "vocoder_models/en/ljspeech/hifigan_v2"
+
+[prompts]
+# 定义 Prompt 标识符及其对应的文件路径 (相对于 prompts/ 目录)
+# 路径可以包含语言/角色/阶段等子目录
+# English Prompts
+default_tutor = "en/persona_lively_female.txt" # Default friendly tutor
+tutor_strict = "en/tutor_strict_grammar.txt" # Strict grammar teacher
+tutor_casual = "en/tutor_casual_conversation.txt" # Casual conversation partner
+tutor_business = "en/tutor_business_english.txt" # Business English focus
+persona_lively = "en/persona_lively_female.txt" # Example Persona: Lively female teacher
+
+# Japanese Prompts (Map to the new files)
+default_tutor_ja = "ja/tutor_default.txt" 
+tutor_strict_ja = "ja/tutor_strict_grammar.txt"
+tutor_casual_ja = "ja/tutor_casual_conversation.txt"
+tutor_business_ja = "ja/tutor_business_japanese.txt" # Adjusted filename slightly
+persona_lively_ja = "ja/persona_lively_female.txt"
+
+# Chinese Prompts
+general_chat_zh = "zh/general_assistant.txt"
+# grammar_expert = "en/advanced/grammar_checker.txt"
+
+[session]
+max_history = 10000 # 会话上下文中保留的最大对话轮数 

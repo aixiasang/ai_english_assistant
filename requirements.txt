@@ -1,0 +1,53 @@
+# Basic requirements
+openai>=1.3.0
+prompt_toolkit
+# Used for reading configuration file
+toml >= 0.10.2
+python-dotenv>=1.0.0 # 必须，用于加载 .env 文件中的环境变量
+
+# --- TTS Dependencies ---
+# Choose your engine and uncomment the necessary lines
+
+# Option 1: Google Text-to-Speech (Requires Internet)
+gTTS>=2.3.0
+# For playback with gTTS or Coqui (alternative to playsound)
+simpleaudio>=1.0.4
+playsound>=1.3.0 # Also needed for gTTS MP3 playback
+
+# Option 2: pyttsx3 (Offline, Basic, System Voices)
+# pyttsx3>=2.90
+
+# Option 3: Piper TTS (Offline, Better Quality, Requires Model Download)
+# piper-tts>=1.2.0
+# # Required by Piper
+# onnxruntime>=1.16.0
+# # Required by Piper for direct playback
+# sounddevice>=0.4.6
+# soundfile>=0.12.1
+
+# Option 4: Coqui TTS (Offline, High Quality, Voice Cloning, Larger Install)
+# TTS>=0.22.0 # Coqui TTS library
+# torch>=2.0.0 # Major dependency for Coqui TTS
+
+
+# --- Other Potential Dependencies ---
+# Add other libraries your project needs here
+
+# Default TTS Option: gTTS (Online, Easy Install, Decent Quality)
+# gTTS>=2.3.0 
+# playsound>=1.3.0 # Needed for gTTS playback
+
+# --- Alternative TTS Options --- 
+
+# Option: pyttsx3 (Offline, Easy Install, Lower Quality)
+# pyttsx3>=2.90 
+
+# Option: Piper TTS (Offline, Good Quality, Requires Model Download & Setup)
+# piper-tts>=1.2.0 
+# onnxruntime>=1.16.0 # Dependency for Piper
+# sounddevice>=0.4.6 # Needed for Piper playback
+# soundfile>=0.12.1 # Needed for Piper file saving
+
+# Other playback libraries (if needed for alternatives):
+# playsound>=1.3.0 # Also needed for Coqui TTS temp file playback
+# pygame 
